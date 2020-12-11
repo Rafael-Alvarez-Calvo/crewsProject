@@ -287,7 +287,8 @@ server.get("/facebookLogin", (req, res) => {
                     if(error)
                         throw error;
                     else if(app_id === `${process.env.FACEBOOK_ID}` && application === "crewsProject" && is_valid !== false && user_id){
-                        fetch(`https://graph.facebook.com/${user_id}?fields=id,email,name&access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`)
+                        // fetch(`https://graph.facebook.com/${user_id}?fields=id,email,name&access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`)
+                        fetch(`https://graph.facebook.com/v9.0/${user_id}?fields=id,email,name&access_token=${data.access_token}`)
                         .then(res => res.json())
                         .then((data,error) =>{
                             console.log(data);
