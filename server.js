@@ -13,6 +13,7 @@ const facebook = new Facebook();
 
 
 const validateCredentials = require("./lib/validator.js");
+const validateEmail = require("./lib/validator.js")
 
 const server = express();
 const listeningPort = 8888;
@@ -43,7 +44,7 @@ function connectionDB() {
         "host": "localhost",
         "user": "root",
         "password": "root",
-        "database": "crewproj"
+        "database": "crewProj"
     });
 }
 
@@ -270,54 +271,120 @@ server.get("/redirectFacebook", (req,res) =>{
 });
 
 server.get("/facebookLogin", async (req, res) => {
-    console.log(req.query);
+
     const Token = await (facebook.getOauthToken(req.query.code, req.query.state));
-    res.send(await facebook.getUserInfo(Token, ["name", "email"]));
+    const data = await facebook.getUserInfo(Token, ["name", "email"])
     
-    // if(req.query.code){
+    const {id, name, email} = data;
 
-    //     fetch(`https://graph.facebook.com/v9.0/oauth/access_token?client_id=${process.env.FACEBOOK_ID}&redirect_uri=http://localhost:8888/facebookLogin&client_secret=${process.env.FACEBOOK_SECRET}&code=${req.query.code}`)
-    //     .then(res => res.json())
-    //     .then((data, error) => {
-    //         // console.log(data);
-    //         if(error)
-    //             throw error;
-    //         else if(data.access_token && data.token_type === "bearer"){
+    console.log(data);
 
-    //             fetch(`https://graph.facebook.com/debug_token?input_token=${data.access_token}&access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`)
-    //             .then(res => res.json())
-    //             .then(({data}, error) =>{
-    //                 // console.log(data);
-    //                 const {app_id, application, is_valid, user_id} = data;
-    //                 if(error)
-    //                     throw error;
-    //                 else if(app_id === `${process.env.FACEBOOK_ID}` && application === "crewsProject" && is_valid !== false && user_id){
-    //                     // fetch(`https://graph.facebook.com/${user_id}?fields=id,email,name&access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`)
-    //                     fetch(`https://graph.facebook.com/v9.0/${user_id}?fields=id,email,name&access_token=${data.access_token}`)
-    //                     .then(res => res.json())
-    //                     .then((data,error) =>{
-    //                         console.log(data);
-    //                     })
-    //                 } else {
-    //                     res.send({"res" : "0", "msg" : error})
-    //                 }
+    if(id && name && email){
 
-    //             })
+        let Validated = validateEmail(email);
 
-    //         } else {
-    //             res.send({"res" : "0", "msg" : "Invalid Token"})
-    //         }
-            
-    //     })
+        if(Validated){
+            const DBconnection = connectionDB();
+            if (DBconnection){
+                const prom = new Promise((resolve, reject) => {
+                    DBconnection.connect(err => {
+                        if (err) {
+                            reject(err);
+                        }
+                        resolve();
+                    });
+                });
+                prom.then(() => {
+                    const sql = "SELECT usrid, faceId, name, email, user_profile FROM usersFacebook WHERE faceId = ? AND email = ? AND name = ?"; //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
+                    DBconnection.query(sql, [id, email, name], (err, result) => {
 
-    // } else {
-    //     res.send({"res" : "0", "msg" : req.query.error_description})
-    // }
+                        if (err){
+                            throw err;
+                        } else if (result.length){
 
+                                //Generate JWT
+                                const Payload = {
+                                    "usrid" : result[0].usrid,
+                                    "name" : result[0].name,
+                                    "email" : result[0].email,
+                                    "profile" : result[0].user_profile,
+                                    "iat" : new Date()
+                                };
+
+                                const jwt = generateJWT(Payload);
+                                const jwtVerified = verifyJWT(jwt);
+
+                                if(jwtVerified){
+
+                                    //Access as administrator
+                                res.cookie("JWT", jwt, {"httpOnly" : true})
+                                    .send({"res" : "1", "msg" : result[0].user_profile});
+
+                                } else {
+                                    res.send({"res" : "0", "msg" : "JWT not verified"})
+                                }
+                                
+                            
+                        } else {
+                            const sql = "INSERT INTO usersFacebook (faceId,name,email) VALUES (?, ?, ?)";
+                            DBconnection.query(sql, [id,name,email], err => {
+                                console.log(result);
+                                if (err){
+                                    throw err;
+                                } else {
+
+                                    const sql = "SELECT usrid, faceId, name, email, user_profile FROM usersFacebook WHERE faceId = ? AND email = ? AND name = ?"; //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
+                                    DBconnection.query(sql, [id, email, name], (err, result) => {
+
+                                        if (err){
+                                            throw err;
+                                        } else {
+                                            
+                                            const Payload = {
+                                                "userid" : result[0].userid,
+                                                "name" : result[0].name,
+                                                "email" : result[0].email,
+                                                "profile" : result[0].user_profile,
+                                                "iat" : new Date()
+                                            };
+        
+                                            const jwt = generateJWT(Payload);
+                                            const jwtVerified = verifyJWT(jwt);
+        
+                                            if(jwtVerified){
+        
+                                            //Access as administrator
+                                            res.cookie("JWT", jwt, {"httpOnly" : true})
+                                                .send({"res" : "1", "msg" : "User registered"});
+        
+                                            } else {
+                                                res.send({"res" : "0", "msg" : "JWT not verified"})
+                                            }
+                                        }
+                                    
+                                    });
+
+                                }
+                                DBconnection.end();
+                            });
+                        }
+                        DBconnection.end();
+                    });
+                })
+                .catch((e) => {
+                    
+                    res.send({"res" : "0", "msg" : "Unable to connect to database", e});
+                });
+            }
+
+        } else {
+
+            res.send({"res" : "0", "msg" : "Error in credentials"})
+        }
+    } else {
+        res.send({"res" : "0", "msg" : "Left credentials"})
+    }
 })
-
-
-// curl -X GET "https://graph.facebook.com/oauth/access_token?client_id=207085617539877&client_secret=f21d97149d35e9027f2c658d8cf24076&grant_type=client_credentials"
 
 server.listen(listeningPort);
 
