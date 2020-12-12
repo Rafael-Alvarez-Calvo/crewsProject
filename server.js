@@ -8,6 +8,8 @@ const cookieParser = require("cookie-parser");
 const fetch = require("node-fetch");
 const dotenv = require("dotenv").config();
 const crypto = require("crypto");
+const Facebook = require("./lib/OauthFacebook");
+const facebook = new Facebook();
 
 
 const validateCredentials = require("./lib/validator.js");
@@ -263,51 +265,54 @@ server.post("/login", (req, res) =>{
 
 server.get("/redirectFacebook", (req,res) =>{
 
-    res.redirect(`https://www.facebook.com/v9.0/dialog/oauth?client_id=${process.env.FACEBOOK_ID}&redirect_uri=http://localhost:8888/facebookLogin&state=${crypto.randomBytes(16)}&scope=email`)
-    // res.redirect(`https://www.facebook.com/v9.0/dialog/oauth?client_id=${process.env.FACEBOOK_ID}&redirect_uri=http://localhost:8888/facebookLogin&state=${crypto.randomBytes(16)}&scope=email,user_birthday,user_gender,user_location`)
+    res.redirect(facebook.getRedirectUrl());
+    // res.redirect(`https://www.facebook.com/v9.0/dialog/oauth?client_id=${process.env.FACEBOOK_ID}&redirect_uri=http://localhost:8888/facebookLogin&state=${crypto.randomBytes(16)}&scope=email`)
 });
 
-server.get("/facebookLogin", (req, res) => {
+server.get("/facebookLogin", async (req, res) => {
+    console.log(req.query);
+    const Token = await (facebook.getOauthToken(req.query.code, req.query.state));
+    res.send(await facebook.getUserInfo(Token, ["name", "email"]));
     
-    if(req.query.code){
+    // if(req.query.code){
 
-        fetch(`https://graph.facebook.com/v9.0/oauth/access_token?client_id=${process.env.FACEBOOK_ID}&redirect_uri=http://localhost:8888/facebookLogin&client_secret=${process.env.FACEBOOK_SECRET}&code=${req.query.code}`)
-        .then(res => res.json())
-        .then((data, error) => {
-            // console.log(data);
-            if(error)
-                throw error;
-            else if(data.access_token && data.token_type === "bearer"){
+    //     fetch(`https://graph.facebook.com/v9.0/oauth/access_token?client_id=${process.env.FACEBOOK_ID}&redirect_uri=http://localhost:8888/facebookLogin&client_secret=${process.env.FACEBOOK_SECRET}&code=${req.query.code}`)
+    //     .then(res => res.json())
+    //     .then((data, error) => {
+    //         // console.log(data);
+    //         if(error)
+    //             throw error;
+    //         else if(data.access_token && data.token_type === "bearer"){
 
-                fetch(`https://graph.facebook.com/debug_token?input_token=${data.access_token}&access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`)
-                .then(res => res.json())
-                .then(({data}, error) =>{
-                    // console.log(data);
-                    const {app_id, application, is_valid, user_id} = data;
-                    if(error)
-                        throw error;
-                    else if(app_id === `${process.env.FACEBOOK_ID}` && application === "crewsProject" && is_valid !== false && user_id){
-                        // fetch(`https://graph.facebook.com/${user_id}?fields=id,email,name&access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`)
-                        fetch(`https://graph.facebook.com/v9.0/${user_id}?fields=id,email,name&access_token=${data.access_token}`)
-                        .then(res => res.json())
-                        .then((data,error) =>{
-                            console.log(data);
-                        })
-                    } else {
-                        res.send({"res" : "0", "msg" : error})
-                    }
+    //             fetch(`https://graph.facebook.com/debug_token?input_token=${data.access_token}&access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`)
+    //             .then(res => res.json())
+    //             .then(({data}, error) =>{
+    //                 // console.log(data);
+    //                 const {app_id, application, is_valid, user_id} = data;
+    //                 if(error)
+    //                     throw error;
+    //                 else if(app_id === `${process.env.FACEBOOK_ID}` && application === "crewsProject" && is_valid !== false && user_id){
+    //                     // fetch(`https://graph.facebook.com/${user_id}?fields=id,email,name&access_token=${process.env.FACEBOOK_ACCESS_TOKEN}`)
+    //                     fetch(`https://graph.facebook.com/v9.0/${user_id}?fields=id,email,name&access_token=${data.access_token}`)
+    //                     .then(res => res.json())
+    //                     .then((data,error) =>{
+    //                         console.log(data);
+    //                     })
+    //                 } else {
+    //                     res.send({"res" : "0", "msg" : error})
+    //                 }
 
-                })
+    //             })
 
-            } else {
-                res.send({"res" : "0", "msg" : "Invalid Token"})
-            }
+    //         } else {
+    //             res.send({"res" : "0", "msg" : "Invalid Token"})
+    //         }
             
-        })
+    //     })
 
-    } else {
-        res.send({"res" : "0", "msg" : req.query.error_description})
-    }
+    // } else {
+    //     res.send({"res" : "0", "msg" : req.query.error_description})
+    // }
 
 })
 
