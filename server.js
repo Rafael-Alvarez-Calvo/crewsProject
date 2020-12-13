@@ -328,6 +328,7 @@ server.get("/facebookLogin", async (req, res) => {
                         } else {
                             const sql = "INSERT INTO usersFacebook (faceId,name,email) VALUES (?, ?, ?)";
                             DBconnection.query(sql, [id,name,email], err => {
+
                                 console.log(result);
                                 if (err){
                                     throw err;
@@ -385,6 +386,8 @@ server.get("/facebookLogin", async (req, res) => {
         res.send({"res" : "0", "msg" : "Left credentials"})
     }
 })
+
+server.get("")
 
 server.listen(listeningPort);
 
