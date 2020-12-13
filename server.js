@@ -387,7 +387,7 @@ server.get("/facebookLogin", async (req, res) => {
     }
 })
 
-server.get("")
+// server.get("")
 
 server.listen(listeningPort);
 
