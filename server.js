@@ -32,7 +32,7 @@ server.use(cookieParser());
 //Setting public directories
 server.use(express.static("./../public"));
 
-server.use(VerifySession);
+// server.use(VerifySession);
 
 
 // const SECRET = crypto.randomBytes(80).toString("hex");
@@ -49,20 +49,20 @@ function connectionDB() {
 }
 
 // Funciones middleware
-function VerifySession(req, res, next){
-    let endpoints = ["/signup", "/login", "/redirectfacebook", "/facebooklogin"];
+// function VerifySession(req, res, next){
+//     let endpoints = ["/signup", "/login", "/redirectfacebook", "/facebooklogin"];
 
-    //indexOf nos devuelve la posicion en el array de lo que estamos buscando en este caso
-    console.log(req.path)
-    if(endpoints.indexOf(req.path.toLowerCase()) > -1 || (req.cookies.JWT && verifyJWT(req.cookies.JWT))){
-        next()
-    } else {
-        res.clearCookie("JWT")
-        // res.redirect("/")
-        res.status(403).send({"res" : "0" , "msg" : "No active session"});
-    }
+//     //indexOf nos devuelve la posicion en el array de lo que estamos buscando en este caso
+//     console.log(req.path)
+//     if(endpoints.indexOf(req.path.toLowerCase()) > -1 || (req.cookies.JWT && verifyJWT(req.cookies.JWT))){
+//         next()
+//     } else {
+//         res.clearCookie("JWT")
+//         // res.redirect("/")
+//         res.status(403).send({"res" : "0" , "msg" : "No active session"});
+//     }
 
-}
+// }
 
 //FUNCIONES JWT
 function parseBase64(base64String) {
@@ -387,7 +387,16 @@ server.get("/facebookLogin", async (req, res) => {
     }
 })
 
-// server.get("")
+server.get("searchproducts/:search", (req,res) =>{
+
+    if(req.params.search){
+        fetch(`https://world.openfoodfacts.org/cgi/search.pl?action=process&tagtype_0=categories&tag_contains_0=contains&tag_0=${req.params.search}`)
+        .then(res => res.json())
+        .then(data =>{
+            console.log(data)
+        })
+    }
+})
 
 server.listen(listeningPort);
 
