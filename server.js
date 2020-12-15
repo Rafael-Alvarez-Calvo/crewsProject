@@ -1,15 +1,16 @@
 //------------------ MODULES -------------------//
 const express = require("express");
-const base64 = require("base-64");
 const mysql = require("mysql");
 const bodyParser = require("body-parser");
 const corsEnable = require("cors");
 const cookieParser = require("cookie-parser");
 const fetch = require("node-fetch");
 const dotenv = require("dotenv").config();
-const crypto = require("crypto");
+
 const Facebook = require("./lib/OauthFacebook");
 const facebook = new Facebook();
+const JWT = require("./lib/JWT.js");
+const Google = require("./lib/OauthGoogle");
 
 
 const validateCredentials = require("./lib/validator.js");
@@ -27,17 +28,10 @@ server.use(bodyParser.urlencoded({"extended" : false}));
 server.use(bodyParser.json());
 server.use(corsEnable());
 server.use(cookieParser());
-
+// server.use(VerifySession);
 
 //Setting public directories
 server.use(express.static("./../public"));
-
-// server.use(VerifySession);
-
-
-// const SECRET = crypto.randomBytes(80).toString("hex");
-// console.log(SECRET);
-const SECRET = process.env.SECRET;
 
 function connectionDB() {
     return mysql.createConnection({
@@ -50,11 +44,11 @@ function connectionDB() {
 
 // Funciones middleware
 // function VerifySession(req, res, next){
-//     let endpoints = ["/signup", "/login", "/redirectfacebook", "/facebooklogin"];
+//     let endpoints = ["/signup", "/login", "facebook-redirect", "/facebook-login", "/google-redirect", "/google-login", "/logout"];
 
 //     //indexOf nos devuelve la posicion en el array de lo que estamos buscando en este caso
-//     console.log(req.path)
-//     if(endpoints.indexOf(req.path.toLowerCase()) > -1 || (req.cookies.JWT && verifyJWT(req.cookies.JWT))){
+//     // console.log(req.path)
+//     if(endpoints.indexOf(req.path.toLowerCase()) > -1 || (req.cookies.JWT && JWT.verifyJWT(req.cookies.JWT))){
 //         next()
 //     } else {
 //         res.clearCookie("JWT")
@@ -63,70 +57,6 @@ function connectionDB() {
 //     }
 
 // }
-
-//FUNCIONES JWT
-function parseBase64(base64String) {
-
-    const parsedString = base64String.replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_").toString("base64");
-    //Reemplazamos el = + \  que pueda contener nuestro string y los sustituimos por sin espacio - _ respectivamente  
-    return parsedString;
-}
-function encodeBase64(string) {
-    const encodedString = base64.encode(string); //encodeamos nuestro string en base64
-    const parsedString = parseBase64(encodedString); //parseamos nuestro string en base64
-    return parsedString;
-}
-
-function decodeBase64(base64String) {
-    const decodedString = base64.decode(base64String); //Se decodifica para ver el interior del payload
-    return decodedString;
-}
-
-function hash(string, key = SECRET) {
-    const hashedString = parseBase64(crypto.createHmac("sha256", key).update(string).digest("base64"));
-    //debemos hashear nuestro parseado
-    //hmac es un algoritmo de hashing combinado con una contraseña
-    return hashedString;
-}
-
-function generateJWT(Payload) {
-    const header = {
-        "alg": "HS256", //esto es obligatorio que coincida con el hash?
-        "typ": "JWT"
-    };
-
-    const base64Header = encodeBase64(JSON.stringify(header));
-    const base64Payload = encodeBase64(JSON.stringify(Payload));
-    const signature = parseBase64(hash(`${base64Header}.${base64Payload}`));
-
-    const JWT = `${base64Header}.${base64Payload}.${signature}`;
-    return JWT;
-}
-
-function verifyJWT(jwt) {
-    const [header, payload, signature] = jwt.split(".");
-    if (header && payload && signature) {
-        const expectedSignature = parseBase64(hash(`${header}.${payload}`));
-        if (expectedSignature === signature)
-            return true;
-    }
-    console.log("No")
-    return false;
-}
-
-function getJWTInfo(jwt) {
-    const payload = jwt.split(".")[1];
-    if (payload) {
-        try {
-            const data = JSON.parse(decodeBase64(payload));
-            return data;
-        }
-        catch (e) {
-            return null;
-        }
-    }
-    return null;
-}
 
 function encryptPassword(string, salt = crypto.randomBytes(128).toString("hex")) {
     let saltedPassword = hash(salt + string + salt, SECRET);
@@ -140,7 +70,7 @@ function verifyPassword(string, realPassword) {
 
 //------------ENDPOINTS--------------------//
 
-server.post("/SignUp", (req,res) =>{
+server.post("/signup", (req,res) =>{
 
     if(req.body.email !== null && req.body.pass !== null){
 
@@ -161,7 +91,7 @@ server.post("/SignUp", (req,res) =>{
                 });
                 prom.then(() => {
                     const sql = "SELECT usrid FROM users WHERE email LIKE ?";
-                    DBconnection.query(sql, [req.body.email], function (err, result) {
+                    DBconnection.query(sql, [req.body.email], (err, result) => {
                         if (err){
                             throw err;
                         } else if (result.length){
@@ -201,7 +131,7 @@ server.post("/login", (req, res) =>{
 
         let Validated = validateCredentials(req.body.email, req.body.psw);
 
-        if(Validated){
+        if(Validated || (req.body.email === "admin" && req.body.psw === "admin")){
             const DBconnection = connectionDB();
             if (DBconnection){
                 const prom = new Promise((resolve, reject) => {
@@ -228,8 +158,8 @@ server.post("/login", (req, res) =>{
                                     "iat" : new Date()
                                 };
 
-                                const jwt = generateJWT(Payload);
-                                const jwtVerified = verifyJWT(jwt);
+                                const jwt = JWT.generateJWT(Payload);
+                                const jwtVerified = JWT.verifyJWT(jwt);
 
                                 if(jwtVerified){
 
@@ -264,13 +194,18 @@ server.post("/login", (req, res) =>{
     }
 });
 
-server.get("/redirectFacebook", (req,res) =>{
+server.get("/logout", (req, res) =>{
+    res.clearCookie(JWT);
+    res.redirect("http://localhost:3000");
+})
+
+server.get("/facebook-redirect", (req,res) =>{
 
     res.redirect(facebook.getRedirectUrl());
     // res.redirect(`https://www.facebook.com/v9.0/dialog/oauth?client_id=${process.env.FACEBOOK_ID}&redirect_uri=http://localhost:8888/facebookLogin&state=${crypto.randomBytes(16)}&scope=email`)
 });
 
-server.get("/facebookLogin", async (req, res) => {
+server.get("/facebook-login", async (req, res) => {
 
     const Token = await (facebook.getOauthToken(req.query.code, req.query.state));
     const data = await facebook.getUserInfo(Token, ["name", "email"])
@@ -295,8 +230,8 @@ server.get("/facebookLogin", async (req, res) => {
                     });
                 });
                 prom.then(() => {
-                    const sql = "SELECT usrid, faceId, name, email, user_profile FROM usersFacebook WHERE faceId = ? AND email = ? AND name = ?"; //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
-                    DBconnection.query(sql, [id, email, name], (err, result) => {
+                    const sql = "SELECT * FROM usersFacebook WHERE email = ?"; //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
+                    DBconnection.query(sql, [email], (err, result) => {
 
                         if (err){
                             throw err;
@@ -307,18 +242,17 @@ server.get("/facebookLogin", async (req, res) => {
                                     "usrid" : result[0].usrid,
                                     "name" : result[0].name,
                                     "email" : result[0].email,
-                                    "profile" : result[0].user_profile,
                                     "iat" : new Date()
                                 };
 
-                                const jwt = generateJWT(Payload);
-                                const jwtVerified = verifyJWT(jwt);
+                                const jwt = JWT.generateJWT(Payload);
+                                const jwtVerified = JWT.verifyJWT(jwt);
 
                                 if(jwtVerified){
 
                                     //Access as administrator
                                 res.cookie("JWT", jwt, {"httpOnly" : true})
-                                    .send({"res" : "1", "msg" : result[0].user_profile});
+                                    .send({"res" : "1", "msg" : `${result[0].name} has been found in usersFacebook logged in with facebook`});
 
                                 } else {
                                     res.send({"res" : "0", "msg" : "JWT not verified"})
@@ -329,53 +263,36 @@ server.get("/facebookLogin", async (req, res) => {
                             const sql = "INSERT INTO usersFacebook (faceId,name,email) VALUES (?, ?, ?)";
                             DBconnection.query(sql, [id,name,email], err => {
 
-                                console.log(result);
                                 if (err){
                                     throw err;
                                 } else {
 
-                                    const sql = "SELECT usrid, faceId, name, email, user_profile FROM usersFacebook WHERE faceId = ? AND email = ? AND name = ?"; //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
-                                    DBconnection.query(sql, [id, email, name], (err, result) => {
+                                    const Payload = {
+                                        "userid" : id,
+                                        "name" : name,
+                                        "email" : email,
+                                        "iat" : new Date()
+                                    };
 
-                                        if (err){
-                                            throw err;
-                                        } else {
-                                            
-                                            const Payload = {
-                                                "userid" : result[0].userid,
-                                                "name" : result[0].name,
-                                                "email" : result[0].email,
-                                                "profile" : result[0].user_profile,
-                                                "iat" : new Date()
-                                            };
-        
-                                            const jwt = generateJWT(Payload);
-                                            const jwtVerified = verifyJWT(jwt);
-        
-                                            if(jwtVerified){
-        
-                                            //Access as administrator
-                                            res.cookie("JWT", jwt, {"httpOnly" : true})
-                                                .send({"res" : "1", "msg" : "User registered"});
-        
-                                            } else {
-                                                res.send({"res" : "0", "msg" : "JWT not verified"})
-                                            }
-                                        }
-                                    
-                                    });
+                                    const jwt = JWT.generateJWT(Payload);
+                                    const jwtVerified = JWT.verifyJWT(jwt);
 
+                                    if(jwtVerified){
+
+                                    res.cookie("JWT", jwt, {"httpOnly" : true})
+                                        .send({"res" : "1", "msg" : `${name} has been added to usersFacebook and logged in with Facebook`});
+
+                                    } else {
+                                        res.send({"res" : "0", "msg" : "JWT not verified"})
+                                    }
+                                       
                                 }
-                                DBconnection.end();
                             });
                         }
                         DBconnection.end();
                     });
                 })
-                .catch((e) => {
-                    
-                    res.send({"res" : "0", "msg" : "Unable to connect to database", e});
-                });
+                prom.catch(e => res.send({"res" : "0", "msg" : "Unable to connect to database", e}));
             }
 
         } else {
@@ -387,16 +304,118 @@ server.get("/facebookLogin", async (req, res) => {
     }
 })
 
-server.get("searchproducts/:search", (req,res) =>{
+server.get("/google-redirect", (req, res) => {
+	res.redirect(Google.getGoogleAuthURL());
+});
 
-    if(req.params.search){
-        fetch(`https://world.openfoodfacts.org/cgi/search.pl?action=process&tagtype_0=categories&tag_contains_0=contains&tag_0=${req.params.search}`)
-        .then(res => res.json())
-        .then(data =>{
-            console.log(data)
-        })
+server.get("/google-login", async (req, res) => {
+
+    const {code} = req.query;
+    
+	if (code) {
+        const userData = await Google.getGoogleUser(code);
+
+        if(userData){
+            // res.send(userData);
+            const {id, email, name} = userData;
+            const Validated = validateEmail(email);
+
+            if(Validated){
+                const DBconnection = connectionDB();
+                if (DBconnection){
+                    const prom = new Promise((resolve, reject) => {
+                        DBconnection.connect(err => {
+                            if (err) {
+                                reject(err);
+                            }
+                            resolve();
+                        });
+                    });
+                    prom.then(() => {
+                        //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
+                        const sql = "SELECT * FROM usersGoogle WHERE email = ?";
+                        DBconnection.query(sql, [email], (err, result) => {
+
+                            if (err){
+                                throw err;
+                            } else if (result.length){
+
+
+                                    //Generate JWT
+                                    const Payload = {
+                                        "usrid" : result[0].usrid,
+                                        "name" : result[0].name,
+                                        "email" : result[0].email,
+                                        "iat" : new Date()
+                                    };
+
+                                    const jwt = JWT.generateJWT(Payload);
+                                    const jwtVerified = JWT.verifyJWT(jwt);
+
+                                    if(jwtVerified){
+
+                                        //Access as administrator
+                                        res.cookie("JWT", jwt, {"httpOnly" : true})
+                                            .send({"res" : "1", "msg" : `${result[0].name} has been found in DB and logged in with google`});
+
+                                    } else {
+                                        res.send({"res" : "0", "msg" : "JWT not verified"})
+                                    }
+                                    
+                            } else {
+
+                                const sql = "INSERT INTO usersGoogle (googleId,name,email) VALUES (?, ?, ?)";
+                                DBconnection.query(sql, [id,name,email], err => {
+                                    if (err){
+                                        throw err;
+                                    } else {
+
+                                        const Payload = {
+                                            "userid" : id,
+                                            "name" : name,
+                                            "email" : email,
+                                            "iat" : new Date()
+                                        };
+    
+                                        const jwt = JWT.generateJWT(Payload);
+                                        const jwtVerified = JWT.verifyJWT(jwt);
+    
+                                        if(jwtVerified){
+    
+                                        //Access as administrator
+                                        res.cookie("JWT", jwt, {"httpOnly" : true})
+                                            .send({"res" : "1", "msg" : `${name} has been added to DB and logged in with Google`});
+    
+                                        } else {
+                                            res.send({"res" : "0", "msg" : "JWT not verified"})
+                                        }
+                                    }
+
+                                });
+                            }
+                            DBconnection.end();
+                        });
+                    })
+                    .catch((e) => {
+                        
+                        res.send({"res" : "0", "msg" : "Unable to connect to database", e});
+                    });
+                }
+            }
+
+        } else {
+            res.send({"res" : "0", "msg" : "No userData"});
+        }
+
+	} else {
+        res.send({"res" : "0", "msg" : "No code"})
     }
-})
+});
+
+server.post("/shopping-list/:list-name/:store", (req,res) =>{
+
+    
+});
 
 server.listen(listeningPort);
 
