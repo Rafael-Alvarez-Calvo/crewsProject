@@ -14,7 +14,8 @@ const Google = require("./lib/OauthGoogle");
 
 
 const validateCredentials = require("./lib/validator.js");
-const validateEmail = require("./lib/validator.js")
+const validateEmail = require("./lib/validator.js");
+const { getJWTInfo } = require("./lib/JWT.js");
 
 const server = express();
 const listeningPort = 8888;
@@ -239,7 +240,7 @@ server.get("/facebook-login", async (req, res) => {
 
                                 //Generate JWT
                                 const Payload = {
-                                    "usrid" : result[0].usrid,
+                                    "usrIdF" : result[0].usrid,
                                     "name" : result[0].name,
                                     "email" : result[0].email,
                                     "iat" : new Date()
@@ -268,7 +269,7 @@ server.get("/facebook-login", async (req, res) => {
                                 } else {
 
                                     const Payload = {
-                                        "userid" : id,
+                                        "userIdF" : id,
                                         "name" : name,
                                         "email" : email,
                                         "iat" : new Date()
@@ -343,7 +344,7 @@ server.get("/google-login", async (req, res) => {
 
                                     //Generate JWT
                                     const Payload = {
-                                        "usrid" : result[0].usrid,
+                                        "usrIdG" : result[0].usrIdG,
                                         "name" : result[0].name,
                                         "email" : result[0].email,
                                         "iat" : new Date()
@@ -371,7 +372,7 @@ server.get("/google-login", async (req, res) => {
                                     } else {
 
                                         const Payload = {
-                                            "userid" : id,
+                                            "userIdG" : id,
                                             "name" : name,
                                             "email" : email,
                                             "iat" : new Date()
@@ -412,9 +413,68 @@ server.get("/google-login", async (req, res) => {
     }
 });
 
-server.post("/shopping-list/:list-name/:store", (req,res) =>{
+server.post("/personal-shopping-list/:listname/:supermarketId", (req,res) =>{
 
+    const {listname, supermarketId} = req.params;
+
+    if(listname && supermarketId){
+
+        const userInfo = JWT.getJWTInfo(req.cookies);
+        //Que devuelve getJWTInfo
     
+        if(userInfo.includes("userid")){
+
+            const { usrid } = userInfo;
+            // ArrUsrid = Object.values(userid) // Question Tengo que convertirlo a array para pasarlo en la query?
+
+            const DBconnection = connectionDB();
+                if (DBconnection){
+                    const prom = new Promise((resolve, reject) => {
+                        DBconnection.connect(err => {
+                            if (err) {
+                                reject(err);
+                            }
+                            resolve();
+                        });
+                    });
+                    prom.then(() => {
+                        //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
+                        const sql = "INSERT INTO PersonalShoppingList (listName,APISMarketId,APISMarketName) VALUES (?, ?, ?)";
+                        DBconnection.query(sql, [listname, supermarketId, req.body.supermarketName], err => {
+                            if(err)
+                             throw err
+                            else {
+                                const sql = "SELECT usrid FROM users WHERE usrid = ?";
+                                DBconnection.query(sql, [ArrUsrid], (err, result) => {
+                                    if(err)
+                                      throw err
+                                    else {
+                                        const sql = "INSERT INTO PShopSmarketsUsers (listName,APISMarketId,APISMarketName) VALUES (?, ?, ?)";
+                                        DBconnection.query(sql, [ArrUsrid], (err, result) => {
+
+                                        })
+
+                                    }
+                                    
+
+                                })
+                            }
+
+                        })
+                    })
+                }
+
+        } else if(userInfo.includes("userIdF")){
+
+        } else if(userInfo.includes("userIdG")){
+
+        } else {
+
+        }
+
+    } else {
+        res.send({"res" : "0", "msg" : "No params"})
+    }
 });
 
 server.listen(listeningPort);
