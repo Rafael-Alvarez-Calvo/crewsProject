@@ -13,6 +13,7 @@ const JWT = require("./lib/JWT.js");
 const Google = require("./lib/OauthGoogle");
 
 
+
 const validateCredentials = require("./lib/validator.js");
 const validateEmail = require("./lib/validator.js");
 const { getJWTInfo } = require("./lib/JWT.js");
@@ -45,7 +46,7 @@ function connectionDB() {
 
 // Funciones middleware
 // function VerifySession(req, res, next){
-//     let endpoints = ["/signup", "/login", "facebook-redirect", "/facebook-login", "/google-redirect", "/google-login", "/logout"];
+//     let endpoints = ["/signup", "/login", "facebook-redirect", "/facebook-login", "/google-redirect", "/google-login", "/logout", /info-user-form"];
 
 //     //indexOf nos devuelve la posicion en el array de lo que estamos buscando en este caso
 //     // console.log(req.path)
@@ -91,27 +92,20 @@ server.post("/signup", (req,res) =>{
                     });
                 });
                 prom.then(() => {
-                    const sql = "SELECT usrid FROM users WHERE email LIKE ?";
+
+                    const sql = "SELECT U.* FROM users U INNER JOIN PersonalUsers PU ON PU.ext_usrid = U.usrid WHERE email = ?";
                     DBconnection.query(sql, [req.body.email], (err, result) => {
                         if (err){
-                            throw err;
-                        } else if (result.length){
-                            //User found already in db
-                            res.send({"res" : "0", "msg" : "Usuario ya registrado!"});
-                        } else {
-                            //Proceed to store user in db table
-                            const sql = "INSERT INTO users (email,psw) VALUES (?, ?)";
-                            DBconnection.query(sql, [req.body.email, req.body.psw], err => {
-                                if (err){
-                                    throw err;
-                                } else {
-                                    res.send({"res" : "1", "msg" : "Usuario registrado!"});
+                            res.send({"res" : "0", "msg" : err});
 
-                                }
-                            });
+                        } else if (result.length){
+                            res.send({"res" : "1", "msg" : "Usuario ya registrado!"});
+
+                        } else {
+                            res.send({"res" : "2", "msg" : "User to fill the form"});   
                         }
+                        DBconnection.end();
                     });
-                    DBconnection.end();
                 })
                 .catch((e) => {
                     if (e === "DBError")
@@ -144,37 +138,38 @@ server.post("/login", (req, res) =>{
                     });
                 });
                 prom.then(() => {
-                    const sql = "SELECT usrid, psw, user_profile FROM users WHERE email = ?"; //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
-                    DBconnection.query(sql, [req.body.email], (err, result) => {
+                    //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
+                    const sql = `SELECT U.* FROM users AS U JOIN PersonalUsers AS PU ON U.usrid = PU.ext_usrid WHERE PU.psw = ? AND U.email = ?`; 
+                    DBconnection.query(sql, [req.body.psw, req.body.email], (err, result) => {
                         if (err){
                             throw err;
                         } else if (result.length){
 
-                            if (result[0].psw === req.body.psw){
-                                //Generate JWT
-                                const Payload = {
-                                    "usrid" : req.body.usrid,
-                                    "user" : req.body.email,
-                                    "profile" : result[0].user_profile,
-                                    "iat" : new Date()
-                                };
+                            //Generate JWT
+                            const Payload = {
+                                "usrid" : result[0].usrid,
+                                "email" : result[0].email,
+                                "name" : result[0].name,
+                                "profile" : result[0].user_profile,
+                                "iat" : new Date()
+                            };
 
-                                const jwt = JWT.generateJWT(Payload);
-                                const jwtVerified = JWT.verifyJWT(jwt);
+                            //COMPLETE Payload
 
-                                if(jwtVerified){
+                            const jwt = JWT.generateJWT(Payload);
+                            const jwtVerified = JWT.verifyJWT(jwt);
 
-                                    //Access as administrator
-                                res.cookie("JWT", jwt, {"httpOnly" : true})
-                                    .send({"res" : "1", "msg" : result[0].user_profile});
+                            if(jwtVerified){
 
-                                } else {
-                                    res.send({"res" : "0", "msg" : "JWT not verified"})
-                                }
-                                
+                                //Access as administrator
+                            res.cookie("JWT", jwt, {"httpOnly" : true})
+                                .send({"res" : "1", "msg" : `${result[0].name} has logged in`});
+
                             } else {
-                                res.send({"res" : "0", "msg" : "Invalid password"});
+                                res.send({"res" : "0", "msg" : "JWT not verified"})
                             }
+                                
+                            
                         } else {
                             res.send({"res" : "0", "msg" : "User not registered"});
                         }
@@ -198,12 +193,135 @@ server.post("/login", (req, res) =>{
 server.get("/logout", (req, res) =>{
     res.clearCookie(JWT);
     res.redirect("http://localhost:3000");
+});
+
+server.post("/info-user-form", (req, res) => {
+
+    if(req.body){
+        //COMPLETAR datos form
+        const {psw, idFacebook, idGoogle, email, name} = req.body;
+        //COMPLETAR con resto de datos pedidos
+
+        const DBconnection = connectionDB();
+            if (DBconnection){
+                const prom = new Promise((resolve, reject) => {
+                    DBconnection.connect(err => {
+                        if (err) {
+                            reject(err);
+                        }
+                        resolve();
+                    });
+                });
+                prom.then(() => {
+                    //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
+                    //COMPLETAR
+                    const sql = "INSERT INTO users (email,name) VALUES (?, ?)";
+                    DBconnection.query(sql, [email, name], (err, result) => {
+                        if(err)
+                            throw err
+                        else {
+
+                            const idResultInsert = result.insertId;
+
+                            const Payload = {
+                                "usrid" : idResultInsert,
+                                "email" : email,
+                                "name" : name,
+                                "iat" : new Date()
+                            };
+
+                            if(psw){
+
+                                const sql = "INSERT INTO PersonalUsers (ext_usrid, psw) VALUES (?, ?)";
+                                DBconnection.query(sql, [idResultInsert, psw], err => {
+                                    if(err){
+                                        res.send({"res" : "0", "msg" : err})
+                                    } else {
+
+                                        //Generate JWT
+                                        const jwt = JWT.generateJWT(Payload);
+                                        const jwtVerified = JWT.verifyJWT(jwt);
+
+                                        if(jwtVerified){
+
+                                            res.cookie("JWT", jwt, {"httpOnly" : true})
+                                            res.send({"res" : "1", "msg" : `${name} has been found in users and logged in`});
+
+                                        } else {
+                                            res.send({"res" : "0", "msg" : "JWT not verified"})
+                                        }
+
+                                    }
+                                    DBconnection.end();
+                                });
+
+                            } else if(idFacebook){
+
+                                const sql = "INSERT INTO UsersFacebook (ext_usrid, idFacebook) VALUES (?, ?)";
+                                DBconnection.query(sql, [idResultInsert, idFacebook], err => {
+                                    if(err){
+                                        res.send({"res" : "0", "msg" : err})
+                                    } else {
+
+                                        //Generate JWT
+                                        const jwt = JWT.generateJWT(Payload);
+                                        const jwtVerified = JWT.verifyJWT(jwt);
+
+                                        if(jwtVerified){
+
+                                            res.cookie("JWT", jwt, {"httpOnly" : true})
+                                            res.send({"res" : "1", "msg" : `${name} has been found in users and logged in with facebook`});
+
+                                        } else {
+                                            res.send({"res" : "0", "msg" : "JWT not verified"})
+                                        }
+                                    }
+                                    DBconnection.end();
+                                });
+
+                            } else if(idGoogle){
+
+                                const sql = "INSERT INTO UsersGoogle (ext_usrid, idGoogle) VALUES (?, ?)";
+                                DBconnection.query(sql, [idResultInsert, idGoogle], err => {
+                                    if(err){
+                                        res.send({"res" : "0", "msg" : err})
+                                    } else {
+
+                                        //Generate JWT
+                                        const jwt = JWT.generateJWT(Payload);
+                                        const jwtVerified = JWT.verifyJWT(jwt);
+
+                                        if(jwtVerified){
+
+                                            res.cookie("JWT", jwt, {"httpOnly" : true})
+                                            res.send({"res" : "1", "msg" : `${name} has been found in users and logged in with google`});
+
+                                        } else {
+                                            res.send({"res" : "0", "msg" : "JWT not verified"})
+                                        }
+                                    }
+                                    DBconnection.end();
+                                });
+
+                            } else {
+                                res.send({"res" : "0", "msg" : "No data"})
+                            }
+                        }
+                    })
+                })
+            } else {
+                res.send({"res" : "0", "msg" : "Error in database connection"});
+            }
+        
+    } else {
+        res.send({"res" : "0", "msg" : "No body"});
+    }
+
 })
 
 server.get("/facebook-redirect", (req,res) =>{
 
     res.redirect(facebook.getRedirectUrl());
-    // res.redirect(`https://www.facebook.com/v9.0/dialog/oauth?client_id=${process.env.FACEBOOK_ID}&redirect_uri=http://localhost:8888/facebookLogin&state=${crypto.randomBytes(16)}&scope=email`)
 });
 
 server.get("/facebook-login", async (req, res) => {
@@ -231,11 +349,11 @@ server.get("/facebook-login", async (req, res) => {
                     });
                 });
                 prom.then(() => {
-                    const sql = "SELECT * FROM usersFacebook WHERE email = ?"; //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
+                    const sql = "SELECT * FROM users U INNER JOIN UsersFacebook UF ON UF.ext_usrid = U.usrid WHERE email = ?"; //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
                     DBconnection.query(sql, [email], (err, result) => {
 
                         if (err){
-                            throw err;
+                            res.send({"res" : "0", "msg" : err})
                         } else if (result.length){
 
                                 //Generate JWT
@@ -246,6 +364,8 @@ server.get("/facebook-login", async (req, res) => {
                                     "iat" : new Date()
                                 };
 
+                                //COMPLETAR con resto de datos pedidos
+
                                 const jwt = JWT.generateJWT(Payload);
                                 const jwtVerified = JWT.verifyJWT(jwt);
 
@@ -253,7 +373,7 @@ server.get("/facebook-login", async (req, res) => {
 
                                     //Access as administrator
                                 res.cookie("JWT", jwt, {"httpOnly" : true})
-                                    .send({"res" : "1", "msg" : `${result[0].name} has been found in usersFacebook logged in with facebook`});
+                                    .send({"res" : "1", "msg" : `${result[0].name} has been found in usersFacebook and logged in with facebook`});
 
                                 } else {
                                     res.send({"res" : "0", "msg" : "JWT not verified"})
@@ -261,34 +381,9 @@ server.get("/facebook-login", async (req, res) => {
                                 
                             
                         } else {
-                            const sql = "INSERT INTO usersFacebook (faceId,name,email) VALUES (?, ?, ?)";
-                            DBconnection.query(sql, [id,name,email], err => {
 
-                                if (err){
-                                    throw err;
-                                } else {
+                            res.send({"res" : "2", "msg" : "User facebook to fill form", data});
 
-                                    const Payload = {
-                                        "userIdF" : id,
-                                        "name" : name,
-                                        "email" : email,
-                                        "iat" : new Date()
-                                    };
-
-                                    const jwt = JWT.generateJWT(Payload);
-                                    const jwtVerified = JWT.verifyJWT(jwt);
-
-                                    if(jwtVerified){
-
-                                    res.cookie("JWT", jwt, {"httpOnly" : true})
-                                        .send({"res" : "1", "msg" : `${name} has been added to usersFacebook and logged in with Facebook`});
-
-                                    } else {
-                                        res.send({"res" : "0", "msg" : "JWT not verified"})
-                                    }
-                                       
-                                }
-                            });
                         }
                         DBconnection.end();
                     });
@@ -303,7 +398,7 @@ server.get("/facebook-login", async (req, res) => {
     } else {
         res.send({"res" : "0", "msg" : "Left credentials"})
     }
-})
+});
 
 server.get("/google-redirect", (req, res) => {
 	res.redirect(Google.getGoogleAuthURL());
@@ -334,65 +429,38 @@ server.get("/google-login", async (req, res) => {
                     });
                     prom.then(() => {
                         //Select siempre devuelve un array, y cuidado con el like, si hay un correo que lo contiene te entran
-                        const sql = "SELECT * FROM usersGoogle WHERE email = ?";
+                        const sql = "SELECT * FROM users U INNER JOIN UsersGoogle UG ON UG.ext_usrid = U.usrid WHERE email = ?";
                         DBconnection.query(sql, [email], (err, result) => {
 
                             if (err){
-                                throw err;
+                                res.send({"res" : "0", "msg" : err})
                             } else if (result.length){
 
 
-                                    //Generate JWT
-                                    const Payload = {
-                                        "usrIdG" : result[0].usrIdG,
-                                        "name" : result[0].name,
-                                        "email" : result[0].email,
-                                        "iat" : new Date()
-                                    };
+                                //Generate JWT
+                                const Payload = {
+                                    "usrIdG" : result[0].usrIdG,
+                                    "name" : result[0].name,
+                                    "email" : result[0].email,
+                                    "iat" : new Date()
+                                };
 
-                                    const jwt = JWT.generateJWT(Payload);
-                                    const jwtVerified = JWT.verifyJWT(jwt);
+                                const jwt = JWT.generateJWT(Payload);
+                                const jwtVerified = JWT.verifyJWT(jwt);
 
-                                    if(jwtVerified){
+                                if(jwtVerified){
 
-                                        //Access as administrator
-                                        res.cookie("JWT", jwt, {"httpOnly" : true})
-                                            .send({"res" : "1", "msg" : `${result[0].name} has been found in DB and logged in with google`});
+                                    //Access as administrator
+                                    res.cookie("JWT", jwt, {"httpOnly" : true})
+                                        .send({"res" : "1", "msg" : `${result[0].name} has been found in DB and logged in with google`});
 
-                                    } else {
-                                        res.send({"res" : "0", "msg" : "JWT not verified"})
-                                    }
+                                } else {
+                                    res.send({"res" : "0", "msg" : "JWT not verified"})
+                                }
                                     
                             } else {
 
-                                const sql = "INSERT INTO usersGoogle (googleId,name,email) VALUES (?, ?, ?)";
-                                DBconnection.query(sql, [id,name,email], err => {
-                                    if (err){
-                                        throw err;
-                                    } else {
-
-                                        const Payload = {
-                                            "userIdG" : id,
-                                            "name" : name,
-                                            "email" : email,
-                                            "iat" : new Date()
-                                        };
-    
-                                        const jwt = JWT.generateJWT(Payload);
-                                        const jwtVerified = JWT.verifyJWT(jwt);
-    
-                                        if(jwtVerified){
-    
-                                        //Access as administrator
-                                        res.cookie("JWT", jwt, {"httpOnly" : true})
-                                            .send({"res" : "1", "msg" : `${name} has been added to DB and logged in with Google`});
-    
-                                        } else {
-                                            res.send({"res" : "0", "msg" : "JWT not verified"})
-                                        }
-                                    }
-
-                                });
+                                res.send({"res" : "2", "msg" : "User Google to fill form", userData})
                             }
                             DBconnection.end();
                         });
@@ -419,7 +487,7 @@ server.post("/personal-shopping-list/:listname/:supermarketId", (req,res) =>{
 
     if(listname && supermarketId){
 
-        const userInfo = JWT.getJWTInfo(req.cookies);
+        const userInfo = JWT.getJWTInfo(req.cookies.JWT);
         //Que devuelve getJWTInfo
     
         if(userInfo.includes("userid")){

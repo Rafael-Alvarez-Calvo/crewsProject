@@ -26,6 +26,7 @@
     "googleapis": "^65.0.0",
     "mysql": "^2.18.1",
     "node-fetch": "^2.6.1",
+    "quagga": "^0.12.1",
     "require.js": "^1.0.0"
   }
 }
